@@ -1,0 +1,19 @@
+apiVersion: v1
+
+kind: Service
+
+metadata:
+  name: masking-frontend-service
+  labels:
+    app.kubernetes.io/name: masking-frontend-service
+
+spec:
+  type: ClusterIP
+  
+  ports:
+  - port: 3000
+    name: tcp-service
+    targetPort: 3000
+
+  selector:
+    app.kubernetes.io/name: masking-frontend
