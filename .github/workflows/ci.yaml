@@ -1,0 +1,126 @@
+name: masking-frontend-ci-workflow
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag (leave empty to use the commit SHA)"
+        required: false
+        type: string
+
+# Cancel older runs of the same branch/PR when a new commit arrives
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm            # caches ~/.npm using package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test --if-present
+
+      - name: Cache Next.js build cache
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+
+      - name: Build
+        run: npm run build
+
+  code-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Scan dependencies and secrets (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+
+  docker-scan:
+    runs-on: ubuntu-latest
+    needs: [build, code-scan]
+    env:
+      IMAGE: ${{ secrets.DOCKER_USERNAME }}/nextjs-app:${{ inputs.image_tag || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build image
+        run: docker build -t "$IMAGE" .
+
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        run: docker push "$IMAGE"
+
+  update-K8s-manifest:
+    runs-on: ubuntu-latest
+    needs: docker-scan
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: Update K8s manifest with new image tag
+      run: |
+            sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/masking_frontend:${{ inputs.image_tag || github.run_id }}|" kubernetes/deployment-masking-frontend.yaml
+
+    - name: Commit and push changes
+      run: |
+            git config --global user.email "navjyotpulaha@gmail.com"
+            git config --global user.name "Navjyotsingh Pulaha"
+            git add kubernetes/deployment-masking-engine.yaml
+            git commit -m "[CI]: update masking frontend image tag"
+            git push origin HEAD:${{ github.ref_name }}
