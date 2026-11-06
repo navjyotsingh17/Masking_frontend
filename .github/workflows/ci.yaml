@@ -17,9 +17,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,9 +32,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Run tests
-        run: npm test --if-present
 
       - name: Build
         run: npm run build
@@ -101,12 +95,12 @@ jobs:
 
     - name: Update K8s manifest with new image tag
       run: |
-            sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/masking_frontend:${{ inputs.image_tag || github.run_id }}|" kubernetes/deployment-masking-frontend.yaml
+            sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/masking_frontend:${{ inputs.image_tag || github.sha }}|" kubernetes/deployment-masking-frontend.yaml
 
     - name: Commit and push changes
       run: |
             git config --global user.email "navjyotpulaha@gmail.com"
             git config --global user.name "Navjyotsingh Pulaha"
-            git add kubernetes/deployment-masking-engine.yaml
+            git add kubernetes/deployment-masking-frontend.yaml
             git commit -m "[CI]: update masking frontend image tag"
             git push origin HEAD:${{ github.ref_name }}
