@@ -24,7 +24,7 @@ spec:
       serviceAccountName: aadhaar-masking  
       containers:
       - name: masking-frontend
-        image: navjyotsinghpulaha/masking_frontend:v0.0.1
+        image: navjyotsinghpulaha/masking_frontend:11-oct-2026
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
