@@ -1,44 +1,19 @@
-# FROM node:20-alpine as builder
-
-# WORKDIR /usr/src/app
-
-# COPY package.json package-lock.json ./
-
-# RUN npm ci
-
-# COPY . .
-
-# RUN npm run build
-
-# EXPOSE 3000
-
-# CMD ["npm", "run", "dev"]
-
-FROM node:22-alpine AS deps
+# Stage 1: build
+FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm ci
-
-FROM node:22-alpine AS builder
-WORKDIR /app
-ENV NEXT_TELEMETRY_DISABLED=1
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runner
+# Stage 2: runtime
+FROM node:22-alpine AS runtime
 WORKDIR /app
-ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1 \
-    HOSTNAME=0.0.0.0 \
-    PORT=3000
-
-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
-
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
+ENV NODE_ENV=production
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
+# remove npm, which is not needed at runtime
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 EXPOSE 3000
 CMD ["node", "server.js"]
